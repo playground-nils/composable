@@ -1,24 +1,20 @@
 name: benchmark
-
-on:
-  workflow_dispatch:
+'on':
+  workflow_dispatch: null
   pull_request:
-    types: [labeled]    
+    types:
+    - labeled
     branches:
-      - main      
+    - main
   schedule:
-    - cron: '30 1 1,15 * *'      
-
+  - cron: 30 1 1,15 * *
 env:
   NIX_NIXPKGS_CHANNEL: https://nixos.org/channels/nixpkgs-22.05-darwin
   CACHIX_COMPOSABLE: composable
-
 jobs:
   update-benchmarks-weights:
     name: update-benchmarks-weights
-    runs-on:
-      - self-hosted
-      - bmark
+    runs-on: ubuntu-latest
     container:
       image: niteo/nixpkgs-nixos-22.05:316b762afdb9e142a803f29c49a88b4a47db80ee
     concurrency:
@@ -26,61 +22,65 @@ jobs:
       cancel-in-progress: true
     strategy:
       matrix:
-        runtime: [picasso, composable]
+        runtime:
+        - picasso
+        - composable
     if: contains(github.event.pull_request.labels.*.name, 'needs-benchmarks')
     steps:
-      - uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+    - name: Setup Nix configuration
+      run: 'echo "experimental-features = nix-command flakes" > /etc/nix/nix.conf
 
-      - name: "Setup Nix configuration"
-        run: |
-          echo "experimental-features = nix-command flakes" > /etc/nix/nix.conf
-          echo "sandbox = relaxed" >> /etc/nix/nix.conf
-          echo "narinfo-cache-negative-ttl = 0" >> /etc/nix/nix.conf
+        echo "sandbox = relaxed" >> /etc/nix/nix.conf
 
-      - uses: cachix/cachix-action@f5f67badd061acb62b5c6e25e763572ca8317004
-        with:
-          name: ${{ env.CACHIX_COMPOSABLE }}
-          skipPush: true
-          installCommand: |
-            nix-channel --add ${{ env.NIX_NIXPKGS_CHANNEL }} nixpkgs
-            nix-channel --update
-            nix-env -iA nixpkgs.cachix nixpkgs.gnupg
+        echo "narinfo-cache-negative-ttl = 0" >> /etc/nix/nix.conf
 
-      - name: Generate weights
-        run: |
-          nix run .#benchmarks-generate-${{ matrix.runtime }} -L
+        '
+    - uses: cachix/cachix-action@f5f67badd061acb62b5c6e25e763572ca8317004
+      with:
+        name: ${{ env.CACHIX_COMPOSABLE }}
+        skipPush: true
+        installCommand: 'nix-channel --add ${{ env.NIX_NIXPKGS_CHANNEL }} nixpkgs
 
-      - name: Get branch name
-        id: branch-name
-        uses: tj-actions/branch-names@v5.1
+          nix-channel --update
 
-      - name: Fixup dubious ownership
-        run: |
-          # No clue why the next action fail without this otherwise.
-          git config --global --add safe.directory /__w/composable/composable
+          nix-env -iA nixpkgs.cachix nixpkgs.gnupg
 
-      - name: Import bot's GPG key for signing commits
-        id: gpg
-        uses: crazy-max/ghaction-import-gpg@v4
-        with:
-          gpg_private_key: ${{ secrets.GLADOS_GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.GLADOS_GPG_PASSPHRASE }}
-          git_config_global: true
-          git_user_signingkey: true
-          git_commit_gpgsign: true
+          '
+    - name: Generate weights
+      run: 'nix run .#benchmarks-generate-${{ matrix.runtime }} -L
 
-      - name: Push generated weights
-        uses: EndBug/add-and-commit@v9
-        env:
-          GITHUB_TOKEN: ${{ secrets.GLADOS_GITHUB_TOKEN }}
-        with:
-          add: "code/parachain/runtime"
-          message: "chore(benchmarking): update ${{ matrix.runtime }} benchmarking weights"
-          push: "true"
-          committer_name: ${{ steps.gpg.outputs.name }}
-          committer_email: ${{ steps.gpg.outputs.email }}
-          author_name: ${{ steps.gpg.outputs.name }}
-          author_email: ${{ steps.gpg.outputs.email }}
-          new_branch: ${{ steps.branch-name.outputs.current_branch }}
+        '
+    - name: Get branch name
+      id: branch-name
+      uses: tj-actions/branch-names@v5.1
+    - name: Fixup dubious ownership
+      run: '# No clue why the next action fail without this otherwise.
+
+        git config --global --add safe.directory /__w/composable/composable
+
+        '
+    - name: Import bot's GPG key for signing commits
+      id: gpg
+      uses: crazy-max/ghaction-import-gpg@v4
+      with:
+        gpg_private_key: ${{ secrets.GLADOS_GPG_PRIVATE_KEY }}
+        passphrase: ${{ secrets.GLADOS_GPG_PASSPHRASE }}
+        git_config_global: true
+        git_user_signingkey: true
+        git_commit_gpgsign: true
+    - name: Push generated weights
+      uses: EndBug/add-and-commit@v9
+      env:
+        GITHUB_TOKEN: ${{ secrets.GLADOS_GITHUB_TOKEN }}
+      with:
+        add: code/parachain/runtime
+        message: 'chore(benchmarking): update ${{ matrix.runtime }} benchmarking weights'
+        push: 'true'
+        committer_name: ${{ steps.gpg.outputs.name }}
+        committer_email: ${{ steps.gpg.outputs.email }}
+        author_name: ${{ steps.gpg.outputs.name }}
+        author_email: ${{ steps.gpg.outputs.email }}
+        new_branch: ${{ steps.branch-name.outputs.current_branch }}
